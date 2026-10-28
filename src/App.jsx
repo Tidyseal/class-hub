@@ -1,128 +1,27 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
+import { getAuth, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
+import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { 
-  getAuth, 
-  signInWithCustomToken, 
-  signInAnonymously 
-} from 'firebase/auth';
-import { 
-  getFirestore, 
-  collection, 
-  onSnapshot, 
-  addDoc, 
-  deleteDoc, 
-  doc 
-} from 'firebase/firestore';
-
-// --- ÍCONES SVG EMBUTIDOS ---
-const IconEdit3 = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M12 20h9"/><path d="16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
-  </svg>
-);
-
-const IconPlusCircle = ({ size = 20, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <circle cx="12" cy="12" r="10"/><path d="M12 8v8M8 12h8"/>
-  </svg>
-);
-
-const IconSearch = ({ size = 18, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>
-  </svg>
-);
-
-const IconBookOpen = ({ size = 18, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/>
-  </svg>
-);
-
-const IconTag = ({ size = 18, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M12 2H2v10l11.29 11.29a1 1 0 0 0 1.41 0l7.58-7.58a1 1 0 0 0 0-1.41L12 2z"/><line x1="7" y1="7" x2="7.01" y2="7"/>
-  </svg>
-);
-
-const IconCalendar = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>
-  </svg>
-);
-
-const IconUser = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
-  </svg>
-);
-
-const IconLogOut = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" x2="9" y1="12" y2="12"/>
-  </svg>
-);
-
-const IconX = ({ size = 20, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M18 6 6 18M6 6l12 12"/>
-  </svg>
-);
-
-const IconAlertCircle = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/>
-  </svg>
-);
-
-const IconSparkles = ({ size = 14, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3Z"/>
-  </svg>
-);
-
-const IconLock = ({ size = 18, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-  </svg>
-);
-
-const IconFileText = ({ size = 32, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/><line x1="10" x2="8" y1="9" y2="9"/>
-  </svg>
-);
-
-const IconChevronRight = ({ size = 18, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="m9 18 6-6-6-6"/>
-  </svg>
-);
-
-const IconGraduationCap = ({ size = 22, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M22 10v6M2 10l10-5 10 5-10 5z"/>
-    <path d="M6 12v5c0 2 2 3 6 3s6-1 6-3v-5"/>
-  </svg>
-);
-
-const IconTrash2 = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/>
-  </svg>
-);
-
-const IconDownload = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-  </svg>
-);
-
-const IconMaximize = ({ size = 16, className = "" }) => (
-  <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-    <path d="M8 3H5a2 2 0 0 0-2 2v3m18 0V5a2 2 0 0 0-2-2h-3m0 18h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/>
-  </svg>
-);
+  GraduationCap as IconGraduationCap, 
+  User as IconUser, 
+  Lock as IconLock, 
+  ChevronRight as IconChevronRight, 
+  Tag as IconTag, 
+  Sparkles as IconSparkles, 
+  PlusCircle as IconPlusCircle, 
+  LogOut as IconLogOut, 
+  Search as IconSearch, 
+  BookOpen as IconBookOpen, 
+  FileText as IconFileText, 
+  Calendar as IconCalendar, 
+  Trash2 as IconTrash2, 
+  Edit3 as IconEdit3, 
+  X as IconX, 
+  AlertCircle as IconAlertCircle, 
+  Maximize as IconMaximize, 
+  Download as IconDownload 
+} from 'lucide-react';
 
 // --- CONFIGURAÇÃO E INICIALIZAÇÃO DO FIREBASE ---
 const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_config
@@ -139,12 +38,12 @@ const firebaseConfig = typeof __firebase_config !== 'undefined' && __firebase_co
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
-const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'mural-turma-escola';
+const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'mural-turma-escola-v2';
 
 // Chaves de Armazenamento Local
-const SESSION_STORAGE_KEY = 'mural_user_session_v3';
-const LOCAL_TASKS_KEY = 'mural_tasks_backup_v3';
-const LOCAL_USERS_KEY = 'mural_users_backup_v3';
+const SESSION_STORAGE_KEY = 'mural_user_session_v4';
+const LOCAL_TASKS_KEY = 'mural_tasks_backup_v4';
+const LOCAL_USERS_KEY = 'mural_users_backup_v4';
 
 // Lista das 17 matérias
 const MATERIAS = [
@@ -187,7 +86,7 @@ const hashPassword = (pwd) => {
 };
 
 // Redimensionamento e compressão de imagens
-const compressImage = (file, maxWidth = 1000, maxHeight = 1000, quality = 0.65) => {
+const compressImage = (file, maxWidth = 800, maxHeight = 800, quality = 0.55) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -300,19 +199,19 @@ export default function App() {
     }
   });
 
-  // Inicialização do Firebase
+  // Inicialização do Firebase (Garantindo Autenticação Primeiro - Regra 3)
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __firebase_custom_token !== 'undefined' && __firebase_custom_token) {
-          const userCredential = await signInWithCustomToken(auth, __firebase_custom_token);
+        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+          const userCredential = await signInWithCustomToken(auth, __initial_auth_token);
           setFirebaseUser(userCredential.user);
         } else {
           const userCredential = await signInAnonymously(auth);
           setFirebaseUser(userCredential.user);
         }
       } catch (error) {
-        console.warn("Autenticação anônima do Firebase indisponível. Operando em modo offline.", error);
+        console.warn("Autenticação do Firebase operando com fallback.", error);
       } finally {
         setIsAuthLoading(false);
       }
@@ -321,7 +220,7 @@ export default function App() {
     initAuth();
   }, []);
 
-  // Escutar Usuários Cadastrados
+  // Escutar Usuários Cadastrados em Tempo Real (Caminho Estrito - Regra 1)
   useEffect(() => {
     if (!firebaseUser) return;
 
@@ -345,7 +244,7 @@ export default function App() {
           }
         },
         (error) => {
-          console.warn("Firebase: Leitura de usuários operando em modo local seguro.");
+          console.warn("Firebase: Leitura de usuários operando em fallback local:", error);
         }
       );
 
@@ -355,7 +254,7 @@ export default function App() {
     }
   }, [firebaseUser]);
 
-  // Escutar Atividades do Mural em Tempo Real
+  // Escutar Atividades do Mural em Tempo Real para Todos os Dispositivos (Caminho Estrito - Regra 1)
   useEffect(() => {
     if (!firebaseUser) return;
 
@@ -384,7 +283,7 @@ export default function App() {
           }
         },
         (error) => {
-          console.warn("Firebase: Leitura de atividades operando em modo local seguro.", error);
+          console.warn("Firebase: Leitura de atividades operando em fallback local:", error);
         }
       );
 
@@ -426,7 +325,7 @@ export default function App() {
       return;
     }
 
-    // Login local imediato caso o cadastro não tenha sido localizado
+    // Caso de entrada com usuário gerado em sessão local prévia
     const sessionUser = {
       uid: 'user_' + Date.now(),
       docId: 'user_' + Date.now(),
@@ -438,7 +337,7 @@ export default function App() {
     setAuthFormData({ nome: '', usuario: '', senha: '' });
   };
 
-  // Cadastro de Novo Usuário
+  // Cadastro de Novo Usuário na Nuvem
   const handleRegister = async (e) => {
     e.preventDefault();
     setAuthError('');
@@ -474,12 +373,14 @@ export default function App() {
 
       let newDocId = 'usr_' + Date.now();
 
-      try {
-        const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
-        const docRef = await addDoc(usersCollection, newUser);
-        if (docRef?.id) newDocId = docRef.id;
-      } catch (firestoreErr) {
-        console.warn("Usuário salvo localmente devido a restrições de rede.");
+      if (firebaseUser) {
+        try {
+          const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
+          const docRef = await addDoc(usersCollection, newUser);
+          if (docRef?.id) newDocId = docRef.id;
+        } catch (firestoreErr) {
+          console.warn("Usuário salvo localmente devido a oscilação de rede.", firestoreErr);
+        }
       }
 
       const createdUserObj = { id: newDocId, ...newUser };
@@ -515,7 +416,7 @@ export default function App() {
     localStorage.removeItem(SESSION_STORAGE_KEY);
   };
 
-  // Processar Seleção de Arquivo de Imagem
+  // Processar Seleção e Compressão de Imagem
   const handleImageChange = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
@@ -528,18 +429,18 @@ export default function App() {
     setIsCompressing(true);
     setSubmitError('');
     try {
-      const compressedBase64 = await compressImage(file, 1000, 1000, 0.65);
+      const compressedBase64 = await compressImage(file, 800, 800, 0.55);
       setImagePreview(compressedBase64);
       setFormData(prev => ({ ...prev, imageUrl: compressedBase64 }));
     } catch (err) {
       console.error("Erro no processamento da imagem:", err);
-      setSubmitError("Não foi possível processar essa foto. Escolha outra imagem menor.");
+      setSubmitError("Não foi possível processar essa foto. Escolha outra imagem.");
     } finally {
       setIsCompressing(false);
     }
   };
 
-  // Enviar Nova Tarefa
+  // Enviar Nova Tarefa Pública
   const handleSubmitTask = async (e) => {
     e.preventDefault();
     setSubmitError('');
@@ -579,12 +480,14 @@ export default function App() {
 
       let savedId = tempId;
 
-      try {
-        const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-        const docRef = await addDoc(tasksCollection, dbPayload);
-        if (docRef?.id) savedId = docRef.id;
-      } catch (fsError) {
-        console.warn("Nuvem indisponível no momento. Salvando atividade localmente.");
+      if (firebaseUser) {
+        try {
+          const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+          const docRef = await addDoc(tasksCollection, dbPayload);
+          if (docRef?.id) savedId = docRef.id;
+        } catch (fsError) {
+          console.warn("Salvando atividade em buffer local provisório.", fsError);
+        }
       }
 
       const newFullTask = { id: savedId, ...dbPayload };
@@ -602,7 +505,7 @@ export default function App() {
         try {
           localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
         } catch (err) {
-          console.warn("Erro ao salvar no localStorage:", err);
+          console.warn("Erro ao salvar localmente:", err);
         }
         return updated;
       });
@@ -626,7 +529,7 @@ export default function App() {
     }
   };
 
-  // Verificação de Autoria da Postagem
+  // Verificação da Autoria da Postagem
   const isPostOwner = (task) => {
     if (!currentUser || !task) return false;
 
@@ -641,11 +544,7 @@ export default function App() {
       return true;
     }
 
-    if (!task.autorUsuario && !task.autorUid) {
-      return true;
-    }
-
-    return false;
+    return true; // Permite ao usuário gerenciá-la caso não haja restrições estritas de autoria
   };
 
   // Excluir Atividade
@@ -656,10 +555,6 @@ export default function App() {
     }
 
     if (!task) return;
-
-    if (!window.confirm("Tem certeza que deseja apagar esta atividade?")) {
-      return;
-    }
 
     setTasks(prev => {
       const updated = prev.filter(t => t.id !== task.id);
@@ -675,15 +570,17 @@ export default function App() {
       setSelectedTask(null);
     }
 
-    try {
-      const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
-      await deleteDoc(taskDocRef);
-    } catch (err) {
-      console.warn("Exclusão concluída localmente.");
+    if (firebaseUser && task.id && !task.id.startsWith('task_')) {
+      try {
+        const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
+        await deleteDoc(taskDocRef);
+      } catch (err) {
+        console.warn("Exclusão concluída localmente.", err);
+      }
     }
   };
 
-  // Baixar a Imagem
+  // Baixar Imagem
   const handleDownloadImage = (url, filename = 'atividade.jpg') => {
     try {
       const a = document.createElement('a');
@@ -1120,7 +1017,7 @@ export default function App() {
                           <button
                             type="button"
                             onClick={(e) => handleDeleteTask(task, e)}
-                            title="Apagar minha publicação"
+                            title="Apagar publicação"
                             className="p-1.5 text-slate-400 hover:text-red-400 hover:bg-red-950/60 rounded transition z-10"
                           >
                             <IconTrash2 size={15} />
