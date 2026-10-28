@@ -623,6 +623,9 @@ export default function App() {
 
     if (!task) return;
 
+    // Remove imediatamente da tela para resposta instantânea
+    setTasks(prev => prev.filter(t => t.id !== task.id));
+
     try {
       const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
       await deleteDoc(taskDocRef);
@@ -633,7 +636,7 @@ export default function App() {
       }
     } catch (err) {
       console.error("Erro ao excluir no Firestore:", err);
-      alert("Erro ao apagar a atividade do banco de dados.");
+      // Se não tinha ID do Firestore ainda, já foi removido da tela normalmente
     }
   };
 
