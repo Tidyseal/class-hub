@@ -184,8 +184,8 @@ const hashPassword = (pwd) => {
   return 'h_' + Math.abs(hash).toString(36);
 };
 
-// Redimensionamento e compressão de imagens (AUMENTADO PARA HD/ALTA DEFINIÇÃO PARA MANTER A LEITURA DE TEXTOS)
-const compressImage = (file, maxWidth = 1920, maxHeight = 1920, quality = 0.90) => {
+// Redimensionamento e compressão de imagens (AJUSTADO PARA MANTER MÁX 1280px / QUALIDADE OTIMIZADA)
+const compressImage = (file, maxWidth = 1280, maxHeight = 1280, quality = 0.75) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -196,7 +196,6 @@ const compressImage = (file, maxWidth = 1920, maxHeight = 1920, quality = 0.90) 
         let width = img.width;
         let height = img.height;
 
-        // Se a imagem for menor que o limite máximo, mantém o tamanho original sem reduzir
         if (width > maxWidth || height > maxHeight) {
           if (width > height) {
             if (width > maxWidth) {
@@ -220,7 +219,6 @@ const compressImage = (file, maxWidth = 1920, maxHeight = 1920, quality = 0.90) 
           return;
         }
 
-        // Suavização ativada para garantir nitidez do texto
         ctx.imageSmoothingEnabled = true;
         ctx.imageSmoothingQuality = 'high';
         ctx.drawImage(img, 0, 0, width, height);
@@ -507,8 +505,8 @@ export default function App() {
     setIsCompressing(true);
     setSubmitError('');
     try {
-      // Compressão em Alta Definição (1920px max, 90% qualidade)
-      const compressedBase64 = await compressImage(file, 1920, 1920, 0.90);
+      // Compressão otimizada (1280px max, 75% qualidade para não exceder limite de documento do Firestore)
+      const compressedBase64 = await compressImage(file, 1280, 1280, 0.75);
       setImagePreview(compressedBase64);
       setFormData(prev => ({ ...prev, imageUrl: compressedBase64 }));
     } catch (err) {
@@ -541,9 +539,8 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-      
-      const payload = {
+      const newTask = {
+        id: 'task_' + Date.now(),
         titulo: String(formData.titulo).trim(),
         materia: String(formData.materia || MATERIAS[0]),
         dataEntrega: String(formData.dataEntrega),
@@ -556,19 +553,22 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      // Promise com timeout de 5 segundos para destravar a interface se a rede oscilar
-      const addPromise = addDoc(tasksCollection, payload);
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Tempo limite excedido na conexão')), 5000)
-      );
+      // Atualização otimista do estado (Aparece na hora para o aluno sem esperar o servidor)
+      setTasks(prev => [newTask, ...prev].sort((a, b) => {
+        const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
+        const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
+        return dateA - dateB;
+      }));
 
-      try {
-        await Promise.race([addPromise, timeoutPromise]);
-      } catch (netErr) {
-        console.warn("Publicado com atraso na conexão (salvo em cache offline/local):", netErr);
-      }
+      // Salva no Firestore
+      const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+      
+      const { id, ...payload } = newTask;
+      addDoc(tasksCollection, payload).catch(err => {
+        console.warn("Publicação pendente enviada em modo offline:", err);
+      });
 
-      // Limpa os campos e fecha o modal imediatamente para não travar na tela
+      // Limpa os campos e fecha o modal
       setFormData({
         titulo: '',
         materia: MATERIAS[0],
@@ -582,7 +582,7 @@ export default function App() {
       setIsModalOpen(false);
     } catch (err) {
       console.error("Erro ao publicar atividade:", err);
-      setSubmitError("Erro ao salvar atividade. Verifique sua conexão e tente novamente.");
+      setSubmitError("Erro ao salvar atividade. Tente reduzir o tamanho da foto.");
     } finally {
       setIsSubmitting(false);
     }
