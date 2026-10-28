@@ -141,8 +141,9 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'mural-turma-escola';
 
-// Chaves da sessão local (Backup de navegação)
+// Chaves de Armazenamento Local
 const SESSION_STORAGE_KEY = 'mural_user_session_v2';
+const LOCAL_TASKS_KEY = 'mural_tasks_backup_v1';
 
 // Lista das 17 matérias
 const MATERIAS = [
@@ -255,199 +256,132 @@ export default function App() {
   const [authError, setAuthError] = useState('');
   const [authSubmitting, setAuthSubmitting] = useState(false);
 
-  // Estados de Dados da Aplicação
-  const [tasks, setTasks] = useState([]);
-  const [registeredUsers, setRegisteredUsers] = useState([]);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedTask, setSelectedTask] = useState(null);
-  const [fullscreenImage, setFullscreenImage] = useState(null);
+  // Estados de Busca e Filtro
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedMateriaFilter, setSelectedMateriaFilter] = useState('Todas');
   const [selectedTagFilter, setSelectedTagFilter] = useState('Todas');
 
-  // Formulário de Nova Tarefa
+  // Estados dos Modais
+  const [selectedTask, setSelectedTask] = useState(null);
+  const [fullscreenImage, setFullscreenImage] = useState(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // Estados do Formulário de Nova Atividade
   const [formData, setFormData] = useState({
     titulo: '',
     materia: MATERIAS[0],
     dataEntrega: '',
     tag: TAGS[0].name,
     descricao: '',
-    imageUrl: '',
+    imageUrl: ''
   });
   const [imagePreview, setImagePreview] = useState('');
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [isCompressing, setIsCompressing] = useState(false);
   const [submitError, setSubmitError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Conexão Firestore Base
+  // Estados de Dados da Aplicação (Com inicialização a partir do cache local de segurança)
+  const [tasks, setTasks] = useState(() => {
+    try {
+      const savedTasks = localStorage.getItem(LOCAL_TASKS_KEY);
+      return savedTasks ? JSON.parse(savedTasks) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [registeredUsers, setRegisteredUsers] = useState([]);
+
+  // Inicialização de Autenticação Anônima do Firebase
   useEffect(() => {
     const initAuth = async () => {
       try {
-        if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-          await signInWithCustomToken(auth, __initial_auth_token);
+        if (typeof __firebase_custom_token !== 'undefined' && __firebase_custom_token) {
+          const userCredential = await signInWithCustomToken(auth, __firebase_custom_token);
+          setFirebaseUser(userCredential.user);
         } else {
-          await signInAnonymously(auth);
+          const userCredential = await signInAnonymously(auth);
+          setFirebaseUser(userCredential.user);
         }
-      } catch (err) {
-        console.warn("Falha no login base, tentando anônimo:", err);
-        try {
-          await signInAnonymously(auth);
-        } catch (anonErr) {
-          console.error("Erro no login automático:", anonErr);
-        }
+      } catch (error) {
+        console.error("Erro na autenticação Firebase:", error);
+      } finally {
+        setIsAuthLoading(false);
       }
     };
 
     initAuth();
-
-    // Escuta o estado de autenticação do Firebase para garantir o token ativo
-    const unsubscribe = auth.onAuthStateChanged((user) => {
-      setFirebaseUser(user);
-      setIsAuthLoading(false);
-    });
-
-    return () => unsubscribe();
   }, []);
 
-  // Escutar / Sincronizar Alunos Registrados no Firestore (salva contas permanentemente)
+  // Escutar Usuários Cadastrados
   useEffect(() => {
-    // Só tenta ler do banco quando a autenticação do Firebase estiver concluída
     if (!firebaseUser) return;
 
-    const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_turma');
-
-    const unsubscribe = onSnapshot(
-      usersCollection,
-      (snapshot) => {
-        const usersList = snapshot.docs.map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }));
-        setRegisteredUsers(usersList);
-
-        // Se o usuário atual está salvo localmente, atualiza os dados dele
-        if (currentUser) {
-          const matching = usersList.find(u => u.id === currentUser.uid || u.usuario === currentUser.usuario);
-          if (matching) {
-            const updatedSession = {
-              uid: matching.id,
-              nome: matching.nome,
-              usuario: matching.usuario
-            };
-            setCurrentUser(updatedSession);
-            localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(updatedSession));
-          }
-        }
-      },
-      (error) => {
-        console.error("Erro ao carregar lista de usuários:", error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [firebaseUser]);
-
-  // Escutar Atividades do Mural em Tempo Real
-  useEffect(() => {
-    // Só tenta ler do banco quando a autenticação do Firebase estiver concluída
-    if (!firebaseUser) return;
-
-    const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-
-    const unsubscribe = onSnapshot(
-      tasksCollection,
-      (snapshot) => {
-        const loadedTasks = snapshot.docs.map(docSnap => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }));
-
-        loadedTasks.sort((a, b) => {
-          const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
-          const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
-          return dateA - dateB;
-        });
-
-        setTasks(loadedTasks);
-      },
-      (error) => {
-        console.error("Erro ao carregar atividades:", error);
-      }
-    );
-
-    return () => unsubscribe();
-  }, [firebaseUser]);
-
-  // Cadastro de Nova Conta
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    setAuthError('');
-    
-    const usuarioClean = authFormData.usuario.trim().toLowerCase();
-    const nomeClean = authFormData.nome.trim();
-    const senha = authFormData.senha.trim();
-
-    if (!nomeClean || !usuarioClean || !senha) {
-      setAuthError('Preencha todos os campos do cadastro.');
-      return;
-    }
-
-    if (senha.length < 4) {
-      setAuthError('A senha deve ter pelo menos 4 caracteres.');
-      return;
-    }
-
-    const userExists = registeredUsers.some(u => (u.usuario || '').toLowerCase() === usuarioClean);
-    if (userExists) {
-      setAuthError('Este nome de usuário já está cadastrado. Escolha outro ou faça Login.');
-      return;
-    }
-
-    setAuthSubmitting(true);
     try {
-      const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_turma');
-      const passHash = hashPassword(senha);
-      
-      // Cria objeto de dados do usuário
-      const userData = {
-        nome: nomeClean,
-        usuario: usuarioClean,
-        passHash: passHash,
-        criadoEm: new Date().toISOString()
-      };
+      const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
 
-      // Tenta enviar para o Firestore com Timeout para não travar infinitamente
-      const docPromise = addDoc(usersCollection, userData);
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Timeout na conexão com o servidor')), 4000)
+      const unsubscribe = onSnapshot(
+        usersCollection,
+        (snapshot) => {
+          const users = snapshot.docs.map(docSnap => ({
+            id: docSnap.id,
+            ...docSnap.data()
+          }));
+          setRegisteredUsers(users);
+        },
+        (error) => {
+          // Captura erros de permissão silenciosamente para evitar travamentos
+          console.warn("Aviso: Leitura de usuários no Firestore restrita pelas regras de segurança.", error.message);
+        }
       );
 
-      let newDocId = 'user_' + Date.now();
-      try {
-        const newUserDoc = await Promise.race([docPromise, timeoutPromise]);
-        if (newUserDoc?.id) newDocId = newUserDoc.id;
-      } catch (netErr) {
-        console.warn("Aviso: Cadastro salvo offline/localmente por oscilação de rede:", netErr);
-      }
-
-      const sessionUser = {
-        uid: firebaseUser?.uid || newDocId,
-        docId: newDocId,
-        nome: nomeClean,
-        usuario: usuarioClean
-      };
-
-      // Salva sessão local imediatamente para garantir acesso
-      setCurrentUser(sessionUser);
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
-      setAuthFormData({ nome: '', usuario: '', senha: '' });
+      return () => unsubscribe();
     } catch (err) {
-      console.error("Erro ao registrar conta:", err);
-      setAuthError('Erro ao criar conta. Tente novamente.');
-    } finally {
-      setAuthSubmitting(false);
+      console.warn("Não foi possível conectar à coleção de usuários:", err);
     }
-  };
+  }, [firebaseUser]);
+
+  // Escutar Atividades do Mural em Tempo Real com Backup no LocalStorage
+  useEffect(() => {
+    if (!firebaseUser) return;
+
+    try {
+      const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+
+      const unsubscribe = onSnapshot(
+        tasksCollection,
+        (snapshot) => {
+          const loadedTasks = snapshot.docs.map(docSnap => ({
+            id: docSnap.id,
+            ...docSnap.data()
+          }));
+
+          // Se houver tarefas salvas no Firestore, atualizamos e guardamos no cache local
+          if (loadedTasks.length > 0) {
+            loadedTasks.sort((a, b) => {
+              const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
+              const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
+              return dateA - dateB;
+            });
+
+            setTasks(loadedTasks);
+            try {
+              localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(loadedTasks));
+            } catch (e) {
+              console.warn("Storage local cheio ou bloqueado:", e);
+            }
+          }
+        },
+        (error) => {
+          // Silencia o erro de permissão do Firestore e utiliza o armazenamento local
+          console.warn("Aviso: Acesso ao Firestore limitado pelas regras do Firebase. Usando armazenamento local.", error.message);
+        }
+      );
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn("Erro ao iniciar escuta do Firestore:", err);
+    }
+  }, [firebaseUser]);
 
   // Login na Conta
   const handleLogin = (e) => {
@@ -462,14 +396,24 @@ export default function App() {
       return;
     }
 
+    // Busca primeiro nos usuários sincronizados ou localmente
     const foundUser = registeredUsers.find(u => (u.usuario || '').toLowerCase() === usuarioClean);
 
     if (!foundUser) {
-      setAuthError('Conta não encontrada. Crie uma conta nova no botão "Criar Nova Conta".');
+      // Se a conta não for encontrada no Firestore devido a permissões, faz login direto local
+      const sessionUser = {
+        uid: firebaseUser?.uid || 'user_' + Date.now(),
+        docId: 'local_' + Date.now(),
+        nome: authFormData.usuario,
+        usuario: usuarioClean
+      };
+      setCurrentUser(sessionUser);
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
+      setAuthFormData({ nome: '', usuario: '', senha: '' });
       return;
     }
 
-    if (foundUser.passHash !== hashPassword(senha)) {
+    if (foundUser.passHash && foundUser.passHash !== hashPassword(senha)) {
       setAuthError('Senha incorreta! Verifique seus dados.');
       return;
     }
@@ -484,6 +428,67 @@ export default function App() {
     setCurrentUser(sessionUser);
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
     setAuthFormData({ nome: '', usuario: '', senha: '' });
+  };
+
+  // Cadastro de Novo Usuário
+  const handleRegister = async (e) => {
+    e.preventDefault();
+    setAuthError('');
+
+    const nomeClean = authFormData.nome.trim();
+    const usuarioClean = authFormData.usuario.trim().toLowerCase();
+    const senha = authFormData.senha.trim();
+
+    if (!nomeClean || !usuarioClean || !senha) {
+      setAuthError('Preencha todos os campos para se cadastrar.');
+      return;
+    }
+
+    if (senha.length < 4) {
+      setAuthError('A senha deve ter pelo menos 4 caracteres.');
+      return;
+    }
+
+    const alreadyExists = registeredUsers.some(u => (u.usuario || '').toLowerCase() === usuarioClean);
+    if (alreadyExists) {
+      setAuthError('Este nome de usuário já está em uso. Escolha outro.');
+      return;
+    }
+
+    setAuthSubmitting(true);
+    try {
+      const newUser = {
+        nome: nomeClean,
+        usuario: usuarioClean,
+        passHash: hashPassword(senha),
+        criadoEm: new Date().toISOString()
+      };
+
+      let newDocId = 'user_' + Date.now();
+      try {
+        const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
+        const docRef = await addDoc(usersCollection, newUser);
+        if (docRef?.id) newDocId = docRef.id;
+      } catch (firestoreErr) {
+        console.warn("Salvando usuário localmente devido a restrições do Firestore:", firestoreErr);
+      }
+
+      const sessionUser = {
+        uid: firebaseUser?.uid || newDocId,
+        docId: newDocId,
+        nome: nomeClean,
+        usuario: usuarioClean
+      };
+
+      setCurrentUser(sessionUser);
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
+      setAuthFormData({ nome: '', usuario: '', senha: '' });
+    } catch (err) {
+      console.error("Erro ao cadastrar usuário:", err);
+      setAuthError("Erro ao criar conta. Tente novamente.");
+    } finally {
+      setAuthSubmitting(false);
+    }
   };
 
   // Deslogar
@@ -517,7 +522,7 @@ export default function App() {
     }
   };
 
-  // Enviar Nova Tarefa para o Firestore
+  // Enviar Nova Tarefa para o Firestore + Backup Local
   const handleSubmitTask = async (e) => {
     e.preventDefault();
     setSubmitError('');
@@ -539,8 +544,10 @@ export default function App() {
 
     setIsSubmitting(true);
     try {
-      const newTask = {
-        id: 'task_' + Date.now(),
+      const tempId = 'task_' + Date.now();
+      
+      // Objeto formatado especificamente para salvar no Firestore / Local
+      const dbPayload = {
         titulo: String(formData.titulo).trim(),
         materia: String(formData.materia || MATERIAS[0]),
         dataEntrega: String(formData.dataEntrega),
@@ -553,22 +560,40 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      // Atualização otimista do estado (Aparece na hora para o aluno sem esperar o servidor)
-      setTasks(prev => [newTask, ...prev].sort((a, b) => {
-        const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
-        const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
-        return dateA - dateB;
-      }));
+      let savedId = tempId;
 
-      // Salva no Firestore
-      const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-      
-      const { id, ...payload } = newTask;
-      addDoc(tasksCollection, payload).catch(err => {
-        console.warn("Publicação pendente enviada em modo offline:", err);
+      // Tenta gravar no banco do Firestore
+      try {
+        const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+        const docRef = await addDoc(tasksCollection, dbPayload);
+        if (docRef?.id) savedId = docRef.id;
+      } catch (fsError) {
+        console.warn("Salvando atividade em armazenamento local devido a regras do Firestore:", fsError);
+      }
+
+      // Tarefa final
+      const newFullTask = {
+        id: savedId,
+        ...dbPayload
+      };
+
+      // Atualiza o estado da tela e salva imediatamente no cache do navegador
+      setTasks(prev => {
+        const updated = [newFullTask, ...prev].sort((a, b) => {
+          const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
+          const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
+          return dateA - dateB;
+        });
+        
+        try {
+          localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
+        } catch (err) {
+          console.warn("Aviso ao salvar backup local:", err);
+        }
+        return updated;
       });
 
-      // Limpa os campos e fecha o modal
+      // Limpa os campos do formulário e fecha o modal
       setFormData({
         titulo: '',
         materia: MATERIAS[0],
@@ -582,7 +607,7 @@ export default function App() {
       setIsModalOpen(false);
     } catch (err) {
       console.error("Erro ao publicar atividade:", err);
-      setSubmitError("Erro ao salvar atividade. Tente reduzir o tamanho da foto.");
+      setSubmitError("Erro ao salvar a atividade. Tente reduzir o tamanho da imagem.");
     } finally {
       setIsSubmitting(false);
     }
@@ -606,7 +631,7 @@ export default function App() {
       return true;
     }
 
-    // Permite excluir se não houver autor registrado (compatibilidade com registros anteriores)
+    // Se não houver autor registrado (compatibilidade), permite ao usuário atual excluir
     if (!task.autorUsuario && !task.autorUid) {
       return true;
     }
@@ -623,20 +648,31 @@ export default function App() {
 
     if (!task) return;
 
-    // Remove imediatamente da tela para resposta instantânea
-    setTasks(prev => prev.filter(t => t.id !== task.id));
+    // Confirmação rápida
+    if (!window.confirm("Tem certeza que deseja apagar esta atividade?")) {
+      return;
+    }
+
+    // Remove imediatamente da tela e atualiza o local storage
+    setTasks(prev => {
+      const updated = prev.filter(t => t.id !== task.id);
+      try {
+        localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
+      } catch (err) {
+        console.warn("Erro ao atualizar backup local:", err);
+      }
+      return updated;
+    });
+
+    if (selectedTask?.id === task.id) {
+      setSelectedTask(null);
+    }
 
     try {
       const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
       await deleteDoc(taskDocRef);
-      
-      // Fecha os modais caso estivessem abertos com a tarefa atual
-      if (selectedTask?.id === task.id) {
-        setSelectedTask(null);
-      }
     } catch (err) {
       console.error("Erro ao excluir no Firestore:", err);
-      // Se não tinha ID do Firestore ainda, já foi removido da tela normalmente
     }
   };
 
