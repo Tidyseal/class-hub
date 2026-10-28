@@ -370,23 +370,21 @@ export default function App() {
             ...docSnap.data()
           }));
 
-          if (loadedTasks.length > 0) {
-            loadedTasks.sort((a, b) => {
-              const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
-              const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
-              return dateA - dateB;
-            });
+          loadedTasks.sort((a, b) => {
+            const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
+            const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
+            return dateA - dateB;
+          });
 
-            setTasks(loadedTasks);
-            try {
-              localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(loadedTasks));
-            } catch (e) {
-              console.warn(e);
-            }
+          setTasks(loadedTasks);
+          try {
+            localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(loadedTasks));
+          } catch (e) {
+            console.warn(e);
           }
         },
         (error) => {
-          console.warn("Firebase: Leitura de atividades operando em modo local seguro.");
+          console.warn("Firebase: Leitura de atividades operando em modo local seguro.", error);
         }
       );
 
@@ -581,34 +579,17 @@ export default function App() {
 
       let savedId = tempId;
 
-      // Promise com timeout de 3.5 segundos para o Firestore
-      const saveToFirestore = new Promise(async (resolve, reject) => {
-        const timeout = setTimeout(() => {
-          reject(new Error("Timeout de conexão"));
-        }, 3500);
-
-        try {
-          const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-          const docRef = await addDoc(tasksCollection, dbPayload);
-          clearTimeout(timeout);
-          if (docRef?.id) resolve(docRef.id);
-          else resolve(tempId);
-        } catch (err) {
-          clearTimeout(timeout);
-          reject(err);
-        }
-      });
-
       try {
-        savedId = await saveToFirestore;
+        const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+        const docRef = await addDoc(tasksCollection, dbPayload);
+        if (docRef?.id) savedId = docRef.id;
       } catch (fsError) {
-        console.warn("Nuvem indisponível ou lenta. Salvando atividade localmente no dispositivo.");
+        console.warn("Nuvem indisponível no momento. Salvando atividade localmente.");
       }
 
       const newFullTask = { id: savedId, ...dbPayload };
 
       setTasks(prev => {
-        // Evita duplicados
         const exists = prev.some(t => t.id === newFullTask.id);
         const updated = exists ? prev : [newFullTask, ...prev];
 
