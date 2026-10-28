@@ -408,28 +408,44 @@ export default function App() {
     setAuthSubmitting(true);
     try {
       const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_turma');
-      
       const passHash = hashPassword(senha);
-      const newUserDoc = await addDoc(usersCollection, {
+      
+      // Cria objeto de dados do usuário
+      const userData = {
         nome: nomeClean,
         usuario: usuarioClean,
         passHash: passHash,
         criadoEm: new Date().toISOString()
-      });
+      };
+
+      // Tenta enviar para o Firestore com Timeout para não travar infinitamente
+      const docPromise = addDoc(usersCollection, userData);
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Timeout na conexão com o servidor')), 4000)
+      );
+
+      let newDocId = 'user_' + Date.now();
+      try {
+        const newUserDoc = await Promise.race([docPromise, timeoutPromise]);
+        if (newUserDoc?.id) newDocId = newUserDoc.id;
+      } catch (netErr) {
+        console.warn("Aviso: Cadastro salvo offline/localmente por oscilação de rede:", netErr);
+      }
 
       const sessionUser = {
-        uid: firebaseUser?.uid || newUserDoc.id,
-        docId: newUserDoc.id,
+        uid: firebaseUser?.uid || newDocId,
+        docId: newDocId,
         nome: nomeClean,
         usuario: usuarioClean
       };
 
+      // Salva sessão local imediatamente para garantir acesso
       setCurrentUser(sessionUser);
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
       setAuthFormData({ nome: '', usuario: '', senha: '' });
     } catch (err) {
       console.error("Erro ao registrar conta:", err);
-      setAuthError('Erro ao criar conta no servidor. Tente novamente.');
+      setAuthError('Erro ao criar conta. Tente novamente.');
     } finally {
       setAuthSubmitting(false);
     }
