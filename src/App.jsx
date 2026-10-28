@@ -562,6 +562,7 @@ export default function App() {
     }
 
     setIsSubmitting(true);
+
     try {
       const tempId = 'task_' + Date.now();
 
@@ -580,18 +581,38 @@ export default function App() {
 
       let savedId = tempId;
 
+      // Promise com timeout de 3.5 segundos para o Firestore
+      const saveToFirestore = new Promise(async (resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("Timeout de conexão"));
+        }, 3500);
+
+        try {
+          const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
+          const docRef = await addDoc(tasksCollection, dbPayload);
+          clearTimeout(timeout);
+          if (docRef?.id) resolve(docRef.id);
+          else resolve(tempId);
+        } catch (err) {
+          clearTimeout(timeout);
+          reject(err);
+        }
+      });
+
       try {
-        const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-        const docRef = await addDoc(tasksCollection, dbPayload);
-        if (docRef?.id) savedId = docRef.id;
+        savedId = await saveToFirestore;
       } catch (fsError) {
-        console.warn("Gravando atividade localmente por conta de limite ou restrição do banco.");
+        console.warn("Nuvem indisponível ou lenta. Salvando atividade localmente no dispositivo.");
       }
 
       const newFullTask = { id: savedId, ...dbPayload };
 
       setTasks(prev => {
-        const updated = [newFullTask, ...prev].sort((a, b) => {
+        // Evita duplicados
+        const exists = prev.some(t => t.id === newFullTask.id);
+        const updated = exists ? prev : [newFullTask, ...prev];
+
+        updated.sort((a, b) => {
           const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
           const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
           return dateA - dateB;
@@ -600,7 +621,7 @@ export default function App() {
         try {
           localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
         } catch (err) {
-          console.warn(err);
+          console.warn("Erro ao salvar no localStorage:", err);
         }
         return updated;
       });
@@ -618,7 +639,7 @@ export default function App() {
       setIsModalOpen(false);
     } catch (err) {
       console.error("Erro ao publicar:", err);
-      setSubmitError("Erro ao salvar atividade. Tente novamente.");
+      setSubmitError("Não foi possível salvar a atividade. Tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
