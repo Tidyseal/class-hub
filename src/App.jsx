@@ -3,7 +3,7 @@ import { initializeApp } from 'firebase/app';
 import { 
   getAuth, 
   signInWithCustomToken, 
-  signInAnonymously
+  signInAnonymously 
 } from 'firebase/auth';
 import { 
   getFirestore, 
@@ -142,8 +142,9 @@ const db = getFirestore(app);
 const appId = typeof __app_id !== 'undefined' && __app_id ? __app_id : 'mural-turma-escola';
 
 // Chaves de Armazenamento Local
-const SESSION_STORAGE_KEY = 'mural_user_session_v2';
-const LOCAL_TASKS_KEY = 'mural_tasks_backup_v1';
+const SESSION_STORAGE_KEY = 'mural_user_session_v3';
+const LOCAL_TASKS_KEY = 'mural_tasks_backup_v3';
+const LOCAL_USERS_KEY = 'mural_users_backup_v3';
 
 // Lista das 17 matérias
 const MATERIAS = [
@@ -174,7 +175,7 @@ const TAGS = [
   { name: "Projeto", color: "bg-emerald-900/60 text-emerald-300 border-emerald-500/40" }
 ];
 
-// Hash simples para senhas locais
+// Hash simples para senhas
 const hashPassword = (pwd) => {
   let hash = 0;
   for (let i = 0; i < pwd.length; i++) {
@@ -185,8 +186,8 @@ const hashPassword = (pwd) => {
   return 'h_' + Math.abs(hash).toString(36);
 };
 
-// Redimensionamento e compressão de imagens (AJUSTADO PARA MANTER MÁX 1280px / QUALIDADE OTIMIZADA)
-const compressImage = (file, maxWidth = 1280, maxHeight = 1280, quality = 0.75) => {
+// Redimensionamento e compressão de imagens
+const compressImage = (file, maxWidth = 1000, maxHeight = 1000, quality = 0.65) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
@@ -221,7 +222,7 @@ const compressImage = (file, maxWidth = 1280, maxHeight = 1280, quality = 0.75) 
         }
 
         ctx.imageSmoothingEnabled = true;
-        ctx.imageSmoothingQuality = 'high';
+        ctx.imageSmoothingQuality = 'medium';
         ctx.drawImage(img, 0, 0, width, height);
 
         const dataUrl = canvas.toDataURL('image/jpeg', quality);
@@ -280,7 +281,7 @@ export default function App() {
   const [submitError, setSubmitError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Estados de Dados da Aplicação (Com inicialização a partir do cache local de segurança)
+  // Estados de Dados da Aplicação com Inicialização Segura por LocalStorage
   const [tasks, setTasks] = useState(() => {
     try {
       const savedTasks = localStorage.getItem(LOCAL_TASKS_KEY);
@@ -289,9 +290,17 @@ export default function App() {
       return [];
     }
   });
-  const [registeredUsers, setRegisteredUsers] = useState([]);
 
-  // Inicialização de Autenticação Anônima do Firebase
+  const [registeredUsers, setRegisteredUsers] = useState(() => {
+    try {
+      const savedUsers = localStorage.getItem(LOCAL_USERS_KEY);
+      return savedUsers ? JSON.parse(savedUsers) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Inicialização do Firebase
   useEffect(() => {
     const initAuth = async () => {
       try {
@@ -303,7 +312,7 @@ export default function App() {
           setFirebaseUser(userCredential.user);
         }
       } catch (error) {
-        console.error("Erro na autenticação Firebase:", error);
+        console.warn("Autenticação anônima do Firebase indisponível. Operando em modo offline.", error);
       } finally {
         setIsAuthLoading(false);
       }
@@ -326,21 +335,27 @@ export default function App() {
             id: docSnap.id,
             ...docSnap.data()
           }));
-          setRegisteredUsers(users);
+          if (users.length > 0) {
+            setRegisteredUsers(users);
+            try {
+              localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
+            } catch (e) {
+              console.warn(e);
+            }
+          }
         },
         (error) => {
-          // Captura erros de permissão silenciosamente para evitar travamentos
-          console.warn("Aviso: Leitura de usuários no Firestore restrita pelas regras de segurança.", error.message);
+          console.warn("Firebase: Leitura de usuários operando em modo local seguro.");
         }
       );
 
       return () => unsubscribe();
     } catch (err) {
-      console.warn("Não foi possível conectar à coleção de usuários:", err);
+      console.warn("Erro ao ler coleção de usuários:", err);
     }
   }, [firebaseUser]);
 
-  // Escutar Atividades do Mural em Tempo Real com Backup no LocalStorage
+  // Escutar Atividades do Mural em Tempo Real
   useEffect(() => {
     if (!firebaseUser) return;
 
@@ -355,7 +370,6 @@ export default function App() {
             ...docSnap.data()
           }));
 
-          // Se houver tarefas salvas no Firestore, atualizamos e guardamos no cache local
           if (loadedTasks.length > 0) {
             loadedTasks.sort((a, b) => {
               const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
@@ -367,19 +381,18 @@ export default function App() {
             try {
               localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(loadedTasks));
             } catch (e) {
-              console.warn("Storage local cheio ou bloqueado:", e);
+              console.warn(e);
             }
           }
         },
         (error) => {
-          // Silencia o erro de permissão do Firestore e utiliza o armazenamento local
-          console.warn("Aviso: Acesso ao Firestore limitado pelas regras do Firebase. Usando armazenamento local.", error.message);
+          console.warn("Firebase: Leitura de atividades operando em modo local seguro.");
         }
       );
 
       return () => unsubscribe();
     } catch (err) {
-      console.warn("Erro ao iniciar escuta do Firestore:", err);
+      console.warn("Erro ao ler atividades:", err);
     }
   }, [firebaseUser]);
 
@@ -396,15 +409,17 @@ export default function App() {
       return;
     }
 
-    // Busca primeiro nos usuários sincronizados ou localmente
     const foundUser = registeredUsers.find(u => (u.usuario || '').toLowerCase() === usuarioClean);
 
-    if (!foundUser) {
-      // Se a conta não for encontrada no Firestore devido a permissões, faz login direto local
+    if (foundUser) {
+      if (foundUser.passHash && foundUser.passHash !== hashPassword(senha)) {
+        setAuthError('Senha incorreta! Verifique seus dados.');
+        return;
+      }
       const sessionUser = {
-        uid: firebaseUser?.uid || 'user_' + Date.now(),
-        docId: 'local_' + Date.now(),
-        nome: authFormData.usuario,
+        uid: foundUser.id || 'usr_' + Date.now(),
+        docId: foundUser.id || 'usr_' + Date.now(),
+        nome: foundUser.nome || usuarioClean,
         usuario: usuarioClean
       };
       setCurrentUser(sessionUser);
@@ -413,18 +428,13 @@ export default function App() {
       return;
     }
 
-    if (foundUser.passHash && foundUser.passHash !== hashPassword(senha)) {
-      setAuthError('Senha incorreta! Verifique seus dados.');
-      return;
-    }
-
+    // Login local imediato caso o cadastro não tenha sido localizado
     const sessionUser = {
-      uid: firebaseUser?.uid || foundUser.id,
-      docId: foundUser.id,
-      nome: foundUser.nome || 'Aluno(a)',
-      usuario: foundUser.usuario
+      uid: 'user_' + Date.now(),
+      docId: 'user_' + Date.now(),
+      nome: authFormData.usuario,
+      usuario: usuarioClean
     };
-
     setCurrentUser(sessionUser);
     localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
     setAuthFormData({ nome: '', usuario: '', senha: '' });
@@ -464,17 +474,27 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      let newDocId = 'user_' + Date.now();
+      let newDocId = 'usr_' + Date.now();
+
       try {
         const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
         const docRef = await addDoc(usersCollection, newUser);
         if (docRef?.id) newDocId = docRef.id;
       } catch (firestoreErr) {
-        console.warn("Salvando usuário localmente devido a restrições do Firestore:", firestoreErr);
+        console.warn("Usuário salvo localmente devido a restrições de rede.");
+      }
+
+      const createdUserObj = { id: newDocId, ...newUser };
+      const updatedUsersList = [...registeredUsers, createdUserObj];
+      setRegisteredUsers(updatedUsersList);
+      try {
+        localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(updatedUsersList));
+      } catch (e) {
+        console.warn(e);
       }
 
       const sessionUser = {
-        uid: firebaseUser?.uid || newDocId,
+        uid: newDocId,
         docId: newDocId,
         nome: nomeClean,
         usuario: usuarioClean
@@ -484,7 +504,7 @@ export default function App() {
       localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessionUser));
       setAuthFormData({ nome: '', usuario: '', senha: '' });
     } catch (err) {
-      console.error("Erro ao cadastrar usuário:", err);
+      console.error("Erro ao cadastrar:", err);
       setAuthError("Erro ao criar conta. Tente novamente.");
     } finally {
       setAuthSubmitting(false);
@@ -510,19 +530,18 @@ export default function App() {
     setIsCompressing(true);
     setSubmitError('');
     try {
-      // Compressão otimizada (1280px max, 75% qualidade para não exceder limite de documento do Firestore)
-      const compressedBase64 = await compressImage(file, 1280, 1280, 0.75);
+      const compressedBase64 = await compressImage(file, 1000, 1000, 0.65);
       setImagePreview(compressedBase64);
       setFormData(prev => ({ ...prev, imageUrl: compressedBase64 }));
     } catch (err) {
-      console.error("Erro ao processar imagem:", err);
-      setSubmitError("Não foi possível processar essa imagem. Tente outra foto ou reduza o tamanho.");
+      console.error("Erro no processamento da imagem:", err);
+      setSubmitError("Não foi possível processar essa foto. Escolha outra imagem menor.");
     } finally {
       setIsCompressing(false);
     }
   };
 
-  // Enviar Nova Tarefa para o Firestore + Backup Local
+  // Enviar Nova Tarefa
   const handleSubmitTask = async (e) => {
     e.preventDefault();
     setSubmitError('');
@@ -545,8 +564,7 @@ export default function App() {
     setIsSubmitting(true);
     try {
       const tempId = 'task_' + Date.now();
-      
-      // Objeto formatado especificamente para salvar no Firestore / Local
+
       const dbPayload = {
         titulo: String(formData.titulo).trim(),
         materia: String(formData.materia || MATERIAS[0]),
@@ -556,44 +574,37 @@ export default function App() {
         imageUrl: String(formData.imageUrl || ''),
         autorNome: String(currentUser.nome || 'Aluno(a)'),
         autorUsuario: String(currentUser.usuario || ''),
-        autorUid: String(firebaseUser?.uid || currentUser.uid || 'anonimo'),
+        autorUid: String(currentUser.uid || 'anonimo'),
         criadoEm: new Date().toISOString()
       };
 
       let savedId = tempId;
 
-      // Tenta gravar no banco do Firestore
       try {
         const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
         const docRef = await addDoc(tasksCollection, dbPayload);
         if (docRef?.id) savedId = docRef.id;
       } catch (fsError) {
-        console.warn("Salvando atividade em armazenamento local devido a regras do Firestore:", fsError);
+        console.warn("Gravando atividade localmente por conta de limite ou restrição do banco.");
       }
 
-      // Tarefa final
-      const newFullTask = {
-        id: savedId,
-        ...dbPayload
-      };
+      const newFullTask = { id: savedId, ...dbPayload };
 
-      // Atualiza o estado da tela e salva imediatamente no cache do navegador
       setTasks(prev => {
         const updated = [newFullTask, ...prev].sort((a, b) => {
           const dateA = a.dataEntrega ? new Date(a.dataEntrega).getTime() : 0;
           const dateB = b.dataEntrega ? new Date(b.dataEntrega).getTime() : 0;
           return dateA - dateB;
         });
-        
+
         try {
           localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
         } catch (err) {
-          console.warn("Aviso ao salvar backup local:", err);
+          console.warn(err);
         }
         return updated;
       });
 
-      // Limpa os campos do formulário e fecha o modal
       setFormData({
         titulo: '',
         materia: MATERIAS[0],
@@ -606,32 +617,28 @@ export default function App() {
       setSubmitError('');
       setIsModalOpen(false);
     } catch (err) {
-      console.error("Erro ao publicar atividade:", err);
-      setSubmitError("Erro ao salvar a atividade. Tente reduzir o tamanho da imagem.");
+      console.error("Erro ao publicar:", err);
+      setSubmitError("Erro ao salvar atividade. Tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Função de Verificação do Autor da Postagem (Simplificada e Garantida)
+  // Verificação de Autoria da Postagem
   const isPostOwner = (task) => {
     if (!currentUser || !task) return false;
-    
-    // Normaliza nomes de usuário
+
     const currentUsername = (currentUser.usuario || '').trim().toLowerCase();
     const taskUsername = (task.autorUsuario || '').trim().toLowerCase();
 
-    // Se o nome de usuário for idêntico
     if (currentUsername && taskUsername && currentUsername === taskUsername) {
       return true;
     }
 
-    // Se o UID coincidir
     if (task.autorUid && (task.autorUid === currentUser.uid || task.autorUid === firebaseUser?.uid)) {
       return true;
     }
 
-    // Se não houver autor registrado (compatibilidade), permite ao usuário atual excluir
     if (!task.autorUsuario && !task.autorUid) {
       return true;
     }
@@ -648,18 +655,16 @@ export default function App() {
 
     if (!task) return;
 
-    // Confirmação rápida
     if (!window.confirm("Tem certeza que deseja apagar esta atividade?")) {
       return;
     }
 
-    // Remove imediatamente da tela e atualiza o local storage
     setTasks(prev => {
       const updated = prev.filter(t => t.id !== task.id);
       try {
         localStorage.setItem(LOCAL_TASKS_KEY, JSON.stringify(updated));
       } catch (err) {
-        console.warn("Erro ao atualizar backup local:", err);
+        console.warn(err);
       }
       return updated;
     });
@@ -672,11 +677,11 @@ export default function App() {
       const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
       await deleteDoc(taskDocRef);
     } catch (err) {
-      console.error("Erro ao excluir no Firestore:", err);
+      console.warn("Exclusão concluída localmente.");
     }
   };
 
-  // Função para Baixar a Imagem
+  // Baixar a Imagem
   const handleDownloadImage = (url, filename = 'atividade.jpg') => {
     try {
       const a = document.createElement('a');
@@ -686,13 +691,11 @@ export default function App() {
       a.click();
       document.body.removeChild(a);
     } catch (err) {
-      console.error("Erro ao baixar imagem:", err);
-      // Fallback
       window.open(url, '_blank');
     }
   };
 
-  // Filtragem das Tarefas
+  // Filtro de Atividades
   const filteredTasks = useMemo(() => {
     return tasks.filter(task => {
       const matchSearch = (task.titulo || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -706,7 +709,7 @@ export default function App() {
     });
   }, [tasks, searchQuery, selectedMateriaFilter, selectedTagFilter]);
 
-  // Cálculo de Prazo
+  // Cálculo de Prazo de Entrega
   const getDeadlineStatus = (dataEntregaStr) => {
     if (!dataEntregaStr) return null;
     const today = new Date();
@@ -730,7 +733,6 @@ export default function App() {
     }
   };
 
-  // Helper para buscar estilo da Tag
   const getTagStyle = (tagName) => {
     const found = TAGS.find(t => t.name === tagName);
     return found ? found.color : "bg-slate-800 text-slate-300 border-slate-700";
@@ -747,7 +749,7 @@ export default function App() {
     );
   }
 
-  // Se não estiver logado, exibe tela de Login / Cadastro
+  // Se não estiver logado, exibe Login / Cadastro
   if (!currentUser) {
     return (
       <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-4 sm:p-6">
@@ -891,7 +893,7 @@ export default function App() {
 
               <div className="text-center mt-6 pt-6 border-t border-slate-800/80">
                 <p className="text-xs text-slate-400">
-                  Já possui cadastrado?{' '}
+                  Já possui cadastro?{' '}
                   <button
                     type="button"
                     onClick={() => { setAuthMode('login'); setAuthError(''); }}
@@ -1060,7 +1062,7 @@ export default function App() {
                   onClick={() => setSelectedTask(task)}
                   className="group bg-slate-900 hover:bg-slate-850 border border-slate-800 hover:border-slate-700/80 rounded-2xl overflow-hidden shadow-lg hover:shadow-2xl transition duration-200 cursor-pointer flex flex-col relative"
                 >
-                  {/* Imagem do Card (se houver) */}
+                  {/* Imagem do Card */}
                   {task.imageUrl ? (
                     <div className="h-44 w-full bg-slate-950 relative overflow-hidden">
                       <img
@@ -1074,7 +1076,7 @@ export default function App() {
 
                   <div className="p-5 flex-1 flex flex-col justify-between space-y-4">
                     <div className="space-y-2.5">
-                      {/* Topo do Card: Matéria + Tag */}
+                      {/* Topo do Card */}
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider bg-indigo-950/80 border border-indigo-800/40 px-2.5 py-1 rounded-md">
                           {task.materia}
@@ -1092,7 +1094,7 @@ export default function App() {
                         {task.titulo}
                       </h2>
 
-                      {/* Descrição em miniatura */}
+                      {/* Descrição */}
                       {task.descricao && (
                         <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed">
                           {task.descricao}
@@ -1214,7 +1216,7 @@ export default function App() {
                 </select>
               </div>
 
-              {/* Anexo de Imagem (OBRIGATÓRIO) */}
+              {/* Anexo de Imagem */}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5 flex items-center gap-1">
                   Foto do Caderno / Anexo * <span className="text-red-400 font-normal text-[10px] uppercase">(Obrigatório)</span>
@@ -1227,7 +1229,7 @@ export default function App() {
                   className="w-full text-xs text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-indigo-950 file:text-indigo-300 hover:file:bg-indigo-900 border border-slate-800 rounded-xl bg-slate-950 p-1.5 transition cursor-pointer"
                 />
                 {isCompressing && (
-                  <p className="text-xs text-indigo-400 mt-1 animate-pulse">Processando e otimizando imagem...</p>
+                  <p className="text-xs text-indigo-400 mt-1 animate-pulse">Otimizando foto...</p>
                 )}
                 {imagePreview && (
                   <div className="mt-2 relative rounded-xl overflow-hidden border border-slate-800 max-h-40">
@@ -1243,7 +1245,7 @@ export default function App() {
                 )}
               </div>
 
-              {/* Descrição / Observações */}
+              {/* Descrição */}
               <div>
                 <label className="block text-xs font-semibold uppercase text-slate-400 mb-1.5">Informações Extras / Instruções</label>
                 <textarea
@@ -1282,7 +1284,6 @@ export default function App() {
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-2xl shadow-2xl overflow-hidden relative my-8 my-auto">
             
-            {/* Cabeçalho do Modal */}
             <div className="p-5 border-b border-slate-800 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-bold text-indigo-400 uppercase tracking-wider bg-indigo-950 border border-indigo-800 px-2.5 py-1 rounded-md">
@@ -1315,12 +1316,10 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Imagem Ampliada */}
               {selectedTask.imageUrl && (
                 <div className="relative rounded-xl overflow-hidden border border-slate-800 bg-slate-950 max-h-[500px] flex items-center justify-center group">
                   <img src={selectedTask.imageUrl} alt={selectedTask.titulo} className="w-full h-full object-contain" />
                   
-                  {/* Botões de Ação na Imagem */}
                   <div className="absolute top-3 right-3 flex items-center gap-2 bg-slate-950/90 backdrop-blur-md p-1.5 rounded-xl border border-slate-800 shadow-xl">
                     <button
                       type="button"
@@ -1344,7 +1343,6 @@ export default function App() {
                 </div>
               )}
 
-              {/* Descrição Completa */}
               {selectedTask.descricao && (
                 <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-4 space-y-1">
                   <h4 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Instruções & Detalhes</h4>
@@ -1378,13 +1376,12 @@ export default function App() {
         </div>
       )}
 
-      {/* MODAL DE IMAGEM EM TELA CHEIA (LIGHTBOX) */}
+      {/* MODAL DE IMAGEM EM TELA CHEIA */}
       {fullscreenImage && (
         <div 
           className="fixed inset-0 z-50 bg-black/95 backdrop-blur-md flex flex-col items-center justify-between p-2 sm:p-4"
           onClick={() => setFullscreenImage(null)}
         >
-          {/* Barra Superior */}
           <div className="w-full flex items-center justify-end gap-3 p-2 z-10" onClick={(e) => e.stopPropagation()}>
             <a
               href={fullscreenImage}
@@ -1412,7 +1409,6 @@ export default function App() {
             </button>
           </div>
 
-          {/* Imagem em Destaque com Rolagem / Zoom */}
           <div className="flex-1 w-full flex items-center justify-center overflow-auto p-2" onClick={(e) => e.stopPropagation()}>
             <img 
               src={fullscreenImage} 
@@ -1421,7 +1417,7 @@ export default function App() {
             />
           </div>
 
-          <p className="text-slate-500 text-xs text-center py-2">Clique em 'Abrir em Nova Aba' se quiser dar zoom total na foto</p>
+          <p className="text-slate-500 text-xs text-center py-2">Clique em 'Abrir em Nova Aba' para zoom livre</p>
         </div>
       )}
 
