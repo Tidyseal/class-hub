@@ -1,7 +1,8 @@
+```react
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken } from 'firebase/auth';
-import { getFirestore, collection, addDoc, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, addDoc, setDoc, onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 
 // --- COMPONENTES DE ÍCONES INLINE (Substituição para lucide-react) ---
 const IconGraduationCap = ({ size = 24, className = "" }) => (
@@ -480,6 +481,7 @@ export default function App() {
 
     setAuthSubmitting(true);
     try {
+      const customUserId = 'usr_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
       const newUser = {
         nome: nomeClean,
         usuario: usuarioClean,
@@ -487,19 +489,16 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      let newDocId = 'usr_' + Date.now();
-
       if (firebaseUser) {
         try {
-          const usersCollection = collection(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural');
-          const docRef = await addDoc(usersCollection, newUser);
-          if (docRef?.id) newDocId = docRef.id;
+          const userDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'usuarios_mural', customUserId);
+          await setDoc(userDocRef, newUser);
         } catch (firestoreErr) {
           console.warn("Usuário salvo localmente devido a oscilação de rede.", firestoreErr);
         }
       }
 
-      const createdUserObj = { id: newDocId, ...newUser };
+      const createdUserObj = { id: customUserId, ...newUser };
       const updatedUsersList = [...registeredUsers, createdUserObj];
       setRegisteredUsers(updatedUsersList);
       try {
@@ -509,8 +508,8 @@ export default function App() {
       }
 
       const sessionUser = {
-        uid: newDocId,
-        docId: newDocId,
+        uid: customUserId,
+        docId: customUserId,
         nome: nomeClean,
         usuario: usuarioClean
       };
@@ -579,7 +578,7 @@ export default function App() {
     setIsSubmitting(true);
 
     try {
-      const tempId = 'task_' + Date.now();
+      const customTaskId = 'task_' + Date.now() + '_' + Math.random().toString(36).substr(2, 4);
 
       const dbPayload = {
         titulo: String(formData.titulo).trim(),
@@ -594,19 +593,16 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      let savedId = tempId;
-
       if (firebaseUser) {
         try {
-          const tasksCollection = collection(db, 'artifacts', appId, 'public', 'data', 'atividades_turma');
-          const docRef = await addDoc(tasksCollection, dbPayload);
-          if (docRef?.id) savedId = docRef.id;
+          const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', customTaskId);
+          await setDoc(taskDocRef, dbPayload);
         } catch (fsError) {
           console.warn("Salvando atividade em buffer local provisório.", fsError);
         }
       }
 
-      const newFullTask = { id: savedId, ...dbPayload };
+      const newFullTask = { id: customTaskId, ...dbPayload };
 
       setTasks(prev => {
         const exists = prev.some(t => t.id === newFullTask.id);
@@ -660,7 +656,7 @@ export default function App() {
       return true;
     }
 
-    return true; // Permite ao usuário gerenciá-la caso não haja restrições estritas de autoria
+    return false;
   };
 
   // Excluir Atividade
@@ -686,7 +682,7 @@ export default function App() {
       setSelectedTask(null);
     }
 
-    if (firebaseUser && task.id && !task.id.startsWith('task_')) {
+    if (firebaseUser && task.id) {
       try {
         const taskDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'atividades_turma', task.id);
         await deleteDoc(taskDocRef);
@@ -1439,3 +1435,4 @@ export default function App() {
     </div>
   );
 }
+```
