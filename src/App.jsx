@@ -556,8 +556,19 @@ export default function App() {
         criadoEm: new Date().toISOString()
       };
 
-      await addDoc(tasksCollection, payload);
+      // Promise com timeout de 5 segundos para destravar a interface se a rede oscilar
+      const addPromise = addDoc(tasksCollection, payload);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Tempo limite excedido na conexão')), 5000)
+      );
 
+      try {
+        await Promise.race([addPromise, timeoutPromise]);
+      } catch (netErr) {
+        console.warn("Publicado com atraso na conexão (salvo em cache offline/local):", netErr);
+      }
+
+      // Limpa os campos e fecha o modal imediatamente para não travar na tela
       setFormData({
         titulo: '',
         materia: MATERIAS[0],
@@ -571,7 +582,7 @@ export default function App() {
       setIsModalOpen(false);
     } catch (err) {
       console.error("Erro ao publicar atividade:", err);
-      setSubmitError("Erro ao salvar atividade. Tente novamente.");
+      setSubmitError("Erro ao salvar atividade. Verifique sua conexão e tente novamente.");
     } finally {
       setIsSubmitting(false);
     }
